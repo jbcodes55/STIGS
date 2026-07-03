@@ -1,0 +1,50 @@
+ <#
+.SYNOPSIS
+    Enables PowerShell Script Block Logging on Windows 11
+
+.NOTES
+    Author          : Joseph Bonhomme
+    LinkedIn        : https://www.linkedin.com/in/joseph-bonhomme-461010213/
+    GitHub          : github.com/jbcodes55
+    Date Created    : 2026-07-03
+    Last Modified   : 2026-07-03    
+    Version         : 1.0
+    CVEs            : N/A
+    Plugin IDs      : N/A
+    STIG-ID         : WN11-CC-000326 
+
+.TESTED ON
+    Date(s) Tested  : 
+    Tested By       : 
+    Systems Tested  : 
+    PowerShell Ver. : 
+
+.USAGE
+    Put any usage instructions here.
+    Example syntax:
+#>
+$RegistryPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging"
+$ValueName = "EnableScriptBlockLogging"
+$RequiredValue = 1
+
+# Create registry path if it does not exist
+if (-not (Test-Path -Path $RegistryPath)) {
+    New-Item -Path $RegistryPath -Force | Out-Null
+}
+
+# Set required STIG value
+New-ItemProperty `
+    -Path $RegistryPath `
+    -Name $ValueName `
+    -Value $RequiredValue `
+    -PropertyType DWord `
+    -Force | Out-Null
+
+# Verify remediation
+$CurrentValue = Get-ItemPropertyValue -Path $RegistryPath -Name $ValueName
+
+if ($CurrentValue -eq $RequiredValue) {
+    Write-Output "Remediation successful: PowerShell Script Block Logging is enabled."
+} else {
+    Write-Output "Remediation failed: PowerShell Script Block Logging is not configured correctly."
+}
