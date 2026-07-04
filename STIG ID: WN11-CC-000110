@@ -1,0 +1,86 @@
+ <#
+.SYNOPSIS
+    Enables PowerShell Script Block Logging on Windows 11
+
+.NOTES
+    Author          : Joseph Bonhomme
+    LinkedIn        : https://www.linkedin.com/in/joseph-bonhomme-461010213/
+    GitHub          : github.com/jbcodes55
+    Date Created    : 2026-07-03
+    Last Modified   : 2026-07-03    
+    Version         : 1.0
+    CVEs            : N/A
+    Plugin IDs      : N/A
+    STIG-ID         : WN11-CC-000110
+.TESTED ON
+    Date(s) Tested  : 
+    Tested By       : 
+    Systems Tested  : 
+    PowerShell Ver. : 
+
+.USAGE
+    Put any usage instructions here.
+    Example syntax:
+#>
+<#
+.SYNOPSIS
+Remediates STIG WN11-CC-000110: Printing over HTTP must be prevented.
+
+.DESCRIPTION
+Creates/updates the required registry value:
+HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers
+DisableHTTPPrinting = 1
+
+.NOTES
+STIG ID: WN11-CC-000110
+Vuln ID: V-253376
+Severity: CAT II
+#>
+
+# Require Administrator
+$currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
+
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Error "This script must be run as Administrator."
+    exit 1
+}
+
+# Registry configuration
+$registryPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers"
+$valueName = "DisableHTTPPrinting"
+$desiredValue = 1
+
+try {
+    # Create registry path if it does not exist
+    if (-not (Test-Path -Path $registryPath)) {
+        New-Item -Path $registryPath -Force | Out-Null
+        Write-Output "Created registry path: $registryPath"
+    }
+
+    # Set DisableHTTPPrinting to 1
+    New-ItemProperty `
+        -Path $registryPath `
+        -Name $valueName `
+        -Value $desiredValue `
+        -PropertyType DWord `
+        -Force | Out-Null
+
+    Write-Output "Successfully configured $valueName to $desiredValue."
+
+    # Validation
+    $currentValue = Get-ItemPropertyValue -Path $registryPath -Name $valueName
+
+    if ($currentValue -eq $desiredValue) {
+        Write-Output "Validation passed: Printing over HTTP is disabled."
+        exit 0
+    }
+    else {
+        Write-Error "Validation failed: $valueName is set to $currentValue."
+        exit 1
+    }
+}
+catch {
+    Write-Error "Remediation failed: $($_.Exception.Message)"
+    exit 1
+}
