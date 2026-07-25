@@ -1,0 +1,109 @@
+ <#
+.SYNOPSIS
+    Enables PowerShell Script Block Logging on Windows 11
+
+.NOTES
+    Author          : Joseph Bonhomme
+    LinkedIn        : https://www.linkedin.com/in/joseph-bonhomme-461010213/
+    GitHub          : github.com/jbcodes55
+    Date Created    : 2026-07-25
+    Last Modified   : 2026-07-25    
+    Version         : 1.0
+    CVEs            : N/A
+    Plugin IDs      : N/A
+    STIG-ID         : WN11-CC-000090
+.TESTED ON
+    Date(s) Tested  : 2026-07-25
+    Tested By       : threat-vm
+    Systems Tested  : 
+    PowerShell Ver. : 
+
+.USAGE
+    Put any usage instructions here.
+    Example syntax:
+#>
+<#
+.SYNOPSIS
+Remediates STIG WN11-CC-000090.
+
+.DESCRIPTION
+Configures registry policy processing so Group Policy objects are reprocessed
+even when they have not changed.
+
+Required setting:
+HKLM:\SOFTWARE\Policies\Microsoft\Windows\Group Policy\
+{35378EAC-683F-11D2-A89A-00C04FBBCFA2}
+
+NoGPOListChanges = 0 (REG_DWORD)
+
+.NOTES
+STIG ID: WN11-CC-000090
+Vulnerability ID: V-253373
+Severity: CAT II
+
+Run from an elevated PowerShell session.
+#>
+
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = "Stop"
+
+$RegistryPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Group Policy\{35378EAC-683F-11D2-A89A-00C04FBBCFA2}"
+$ValueName    = "NoGPOListChanges"
+$DesiredValue = 0
+
+function Test-Administrator {
+    $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($currentIdentity)
+
+    return $principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
+if (-not (Test-Administrator)) {
+    Write-Error "This script must be run as Administrator."
+    exit 1
+}
+
+try {
+    # Create the registry path if it does not exist.
+    if (-not (Test-Path -Path $RegistryPath)) {
+        New-Item -Path $RegistryPath -Force | Out-Null
+        Write-Output "Created registry path: $RegistryPath"
+    }
+
+    # Configure Group Policy processing to run even when GPOs have not changed.
+    New-ItemProperty `
+        -Path $RegistryPath `
+        -Name $ValueName `
+        -PropertyType DWord `
+        -Value $DesiredValue `
+        -Force | Out-Null
+
+    Write-Output "Configured $ValueName as REG_DWORD with a value of $DesiredValue."
+
+    # Validate the setting.
+    $CurrentValue = Get-ItemPropertyValue `
+        -Path $RegistryPath `
+        -Name $ValueName `
+        -ErrorAction Stop
+
+    $PropertyKind = (Get-Item -Path $RegistryPath).GetValueKind($ValueName)
+
+    if (
+        $CurrentValue -eq $DesiredValue -and
+        $PropertyKind -eq [Microsoft.Win32.RegistryValueKind]::DWord
+    ) {
+        Write-Output "Validation passed: Group Policy objects will be reprocessed even if they have not changed."
+        exit 0
+    }
+
+    Write-Error "Validation failed. Current value: $CurrentValue; type: $PropertyKind."
+    exit 1
+}
+catch {
+    Write-Error "STIG remediation failed: $($_.Exception.Message)"
+    exit 1
+}
