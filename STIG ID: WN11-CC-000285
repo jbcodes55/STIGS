@@ -1,0 +1,83 @@
+<#
+.SYNOPSIS
+Remediates STIG WN11-CC-000285.
+
+.DESCRIPTION
+Requires secure RPC communications for Remote Desktop Session Host by
+configuring the following registry value:
+
+HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services
+fEncryptRPCTraffic = 1 (REG_DWORD)
+
+.NOTES
+STIG ID: WN11-CC-000285
+Vulnerability ID: V-253405
+Severity: CAT II
+
+Run this script from an elevated PowerShell session.
+#>
+
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+
+$RegistryPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
+$ValueName    = 'fEncryptRPCTraffic'
+$DesiredValue = 1
+
+function Test-Administrator {
+    $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $Principal = [Security.Principal.WindowsPrincipal]::new($Identity)
+
+    return $Principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
+if (-not (Test-Administrator)) {
+    Write-Error 'This script must be run as Administrator.'
+    exit 1
+}
+
+try {
+    # Create the policy registry path if it does not exist.
+    if (-not (Test-Path -Path $RegistryPath)) {
+        New-Item -Path $RegistryPath -Force | Out-Null
+        Write-Output "Created registry path: $RegistryPath"
+    }
+
+    # Require secure RPC communication for Remote Desktop Services.
+    New-ItemProperty `
+        -Path $RegistryPath `
+        -Name $ValueName `
+        -PropertyType DWord `
+        -Value $DesiredValue `
+        -Force |
+        Out-Null
+
+    Write-Output "Configured $ValueName to $DesiredValue."
+
+    # Validate the registry value and data type.
+    $CurrentValue = Get-ItemPropertyValue `
+        -Path $RegistryPath `
+        -Name $ValueName `
+        -ErrorAction Stop
+
+    $CurrentType = (Get-Item -Path $RegistryPath).GetValueKind($ValueName)
+
+    if (
+        $CurrentValue -eq $DesiredValue -and
+        $CurrentType -eq [Microsoft.Win32.RegistryValueKind]::DWord
+    ) {
+        Write-Output 'Validation passed: secure RPC communication is required for Remote Desktop Session Host.'
+        Write-Output 'STIG WN11-CC-000285 was remediated successfully.'
+        exit 0
+    }
+
+    throw "Validation failed. Current value: '$CurrentValue'; type: '$CurrentType'."
+}
+catch {
+    Write-Error "STIG remediation failed: $($_.Exception.Message)"
+    exit 1
+}
