@@ -1,0 +1,97 @@
+<#
+.SYNOPSIS
+Remediates STIG WN11-EP-000310.
+
+.DESCRIPTION
+Configures Windows 11 to block enumeration of external devices that are
+incompatible with Kernel DMA Protection.
+
+Required registry configuration:
+
+Registry path:
+HKLM:\SOFTWARE\Policies\Microsoft\Windows\Kernel DMA Protection
+
+Value:
+DeviceEnumerationPolicy = 0 (REG_DWORD)
+
+A value of 0 corresponds to the Group Policy setting "Block All".
+
+.NOTES
+STIG ID: WN11-EP-000310
+Vulnerability ID: V-253426
+Severity: CAT II
+
+This script must be run from an elevated PowerShell session.
+#>
+
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = "Stop"
+
+$RegistryPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Kernel DMA Protection"
+$ValueName = "DeviceEnumerationPolicy"
+$DesiredValue = 0
+
+function Test-Administrator {
+    $CurrentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+
+    $Principal = [Security.Principal.WindowsPrincipal]::new(
+        $CurrentIdentity
+    )
+
+    return $Principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
+if (-not (Test-Administrator)) {
+    Write-Error "This script must be run as Administrator."
+    exit 1
+}
+
+try {
+    # Create the policy registry path if it does not exist.
+    if (-not (Test-Path -Path $RegistryPath)) {
+        New-Item `
+            -Path $RegistryPath `
+            -Force |
+            Out-Null
+
+        Write-Output "Created registry path: $RegistryPath"
+    }
+
+    # Configure the enumeration policy to Block All.
+    New-ItemProperty `
+        -Path $RegistryPath `
+        -Name $ValueName `
+        -PropertyType DWord `
+        -Value $DesiredValue `
+        -Force |
+        Out-Null
+
+    Write-Output "Configured $ValueName to $DesiredValue."
+
+    # Validate the registry value and data type.
+    $CurrentValue = Get-ItemPropertyValue `
+        -Path $RegistryPath `
+        -Name $ValueName `
+        -ErrorAction Stop
+
+    $CurrentType = (Get-Item -Path $RegistryPath).GetValueKind($ValueName)
+
+    if (
+        $CurrentValue -eq $DesiredValue -and
+        $CurrentType -eq [Microsoft.Win32.RegistryValueKind]::DWord
+    ) {
+        Write-Output "Validation passed: incompatible external devices are configured to be blocked."
+        Write-Output "STIG WN11-EP-000310 has been remediated successfully."
+        exit 0
+    }
+
+    throw "Validation failed. Current value: '$CurrentValue'; type: '$CurrentType'."
+}
+catch {
+    Write-Error "STIG remediation failed: $($_.Exception.Message)"
+    exit 1
+}
