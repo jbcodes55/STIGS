@@ -1,0 +1,82 @@
+<#
+.SYNOPSIS
+Remediates STIG WN11-CC-000197.
+
+.DESCRIPTION
+Turns off Microsoft consumer experiences by configuring:
+
+HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent
+DisableWindowsConsumerFeatures = 1 (REG_DWORD)
+
+.NOTES
+STIG ID: WN11-CC-000197
+Vulnerability ID: V-253390
+Severity: CAT III
+
+Run this script from an elevated PowerShell session.
+#>
+
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+
+$RegistryPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent'
+$ValueName    = 'DisableWindowsConsumerFeatures'
+$DesiredValue = 1
+
+function Test-Administrator {
+    $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $Principal = [Security.Principal.WindowsPrincipal]::new($Identity)
+
+    return $Principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
+if (-not (Test-Administrator)) {
+    Write-Error 'This script must be run as Administrator.'
+    exit 1
+}
+
+try {
+    # Create the policy path if it does not exist.
+    if (-not (Test-Path -Path $RegistryPath)) {
+        New-Item -Path $RegistryPath -Force | Out-Null
+        Write-Output "Created registry path: $RegistryPath"
+    }
+
+    # Enable the policy that disables Microsoft consumer experiences.
+    New-ItemProperty `
+        -Path $RegistryPath `
+        -Name $ValueName `
+        -PropertyType DWord `
+        -Value $DesiredValue `
+        -Force |
+        Out-Null
+
+    Write-Output "Configured $ValueName to $DesiredValue."
+
+    # Validate the value and registry data type.
+    $CurrentValue = Get-ItemPropertyValue `
+        -Path $RegistryPath `
+        -Name $ValueName `
+        -ErrorAction Stop
+
+    $CurrentType = (Get-Item -Path $RegistryPath).GetValueKind($ValueName)
+
+    if (
+        $CurrentValue -eq $DesiredValue -and
+        $CurrentType -eq [Microsoft.Win32.RegistryValueKind]::DWord
+    ) {
+        Write-Output 'Validation passed: Microsoft consumer experiences are turned off.'
+        Write-Output 'STIG WN11-CC-000197 was remediated successfully.'
+        exit 0
+    }
+
+    throw "Validation failed. Current value: '$CurrentValue'; type: '$CurrentType'."
+}
+catch {
+    Write-Error "STIG remediation failed: $($_.Exception.Message)"
+    exit 1
+}
