@@ -1,0 +1,94 @@
+<#
+.SYNOPSIS
+Remediates STIG WN11-CC-000185.
+
+.DESCRIPTION
+Configures Windows to prevent AutoRun commands from executing by setting:
+
+HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer
+NoAutorun = 1 (REG_DWORD)
+
+This corresponds to the Group Policy setting:
+Computer Configuration >
+Administrative Templates >
+Windows Components >
+AutoPlay Policies >
+"Set the default behavior for AutoRun" =
+Enabled: "Do not execute any autorun commands"
+
+.NOTES
+STIG ID: WN11-CC-000185
+Vulnerability ID: V-253387
+Severity: CAT I
+CCI: CCI-001764
+
+Run this script from an elevated PowerShell session.
+#>
+
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+
+$RegistryPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
+$ValueName    = 'NoAutorun'
+$DesiredValue = 1
+
+function Test-Administrator {
+    $CurrentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $Principal = [Security.Principal.WindowsPrincipal]::new($CurrentIdentity)
+
+    return $Principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
+if (-not (Test-Administrator)) {
+    Write-Error "This script must be run as Administrator."
+    exit 1
+}
+
+try {
+
+    # Create the registry path if it does not exist.
+    if (-not (Test-Path -Path $RegistryPath)) {
+        New-Item `
+            -Path $RegistryPath `
+            -Force | Out-Null
+
+        Write-Output "Created registry path: $RegistryPath"
+    }
+
+    # Configure AutoRun to not execute any autorun commands.
+    New-ItemProperty `
+        -Path $RegistryPath `
+        -Name $ValueName `
+        -PropertyType DWord `
+        -Value $DesiredValue `
+        -Force | Out-Null
+
+    Write-Output "Configured '$ValueName' to '$DesiredValue'."
+
+    # Validate the registry value.
+    $CurrentValue = Get-ItemPropertyValue `
+        -Path $RegistryPath `
+        -Name $ValueName `
+        -ErrorAction Stop
+
+    $CurrentType = (Get-Item -Path $RegistryPath).GetValueKind($ValueName)
+
+    if (
+        $CurrentValue -eq $DesiredValue -and
+        $CurrentType -eq [Microsoft.Win32.RegistryValueKind]::DWord
+    ) {
+        Write-Output "Validation passed: AutoRun commands are disabled."
+        Write-Output "STIG WN11-CC-000185 remediated successfully."
+        exit 0
+    }
+
+    throw "Validation failed. Current value: '$CurrentValue'; Registry type: '$CurrentType'."
+}
+catch {
+    Write-Error "STIG remediation failed: $($_.Exception.Message)"
+    exit 1
+}
