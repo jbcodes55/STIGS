@@ -1,7 +1,30 @@
 <#
 .SYNOPSIS
 Remediates STIG WN11-CC-000285.
+    
 
+.NOTES
+    Author          : Joseph Bonhomme
+    LinkedIn        : https://www.linkedin.com/in/joseph-bonhomme-461010213/
+    GitHub          : github.com/jbcodes55
+    Date Created    : 2026-07-26
+    Last Modified   : 2026-07-26    
+    Version         : 1.0
+    CVEs            : N/A
+    Plugin IDs      : N/A
+    STIG-ID         : WN11-CC-000285
+.TESTED ON
+    Date(s) Tested  : 2026-07-26
+    Tested By       : threat-vm (Azure VM)
+    Systems Tested  : 
+    PowerShell Ver. : 
+
+.USAGE
+    Put any usage instructions here.
+    Example syntax:
+#>
+
+<#
 .DESCRIPTION
 Requires secure RPC communications for Remote Desktop Session Host by
 configuring the following registry value:
