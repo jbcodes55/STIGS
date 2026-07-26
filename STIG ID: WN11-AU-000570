@@ -1,0 +1,122 @@
+<#
+.SYNOPSIS
+Remediates STIG WN11-AU-000570.
+
+.DESCRIPTION
+Configures Windows Advanced Audit Policy to audit failures for the
+"Detailed File Share" subcategory.
+
+This setting records failed attempts to access files and folders through
+Windows file shares.
+
+.NOTES
+STIG ID: WN11-AU-000570
+Vulnerability ID: V-253347
+Severity: CAT II
+CCI: CCI-000130
+
+Run this script from an elevated Windows PowerShell session.
+
+Domain Group Policy may overwrite this local setting on domain-joined systems.
+#>
+
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+
+$AuditSubcategory = 'Detailed File Share'
+$LsaRegistryPath  = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa'
+$LsaValueName     = 'SCENoApplyLegacyAuditPolicy'
+$LsaDesiredValue  = 1
+
+function Test-Administrator {
+    $CurrentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $Principal = [Security.Principal.WindowsPrincipal]::new($CurrentIdentity)
+
+    return $Principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
+function Get-DetailedFileShareAuditSetting {
+    $AuditOutput = & auditpol.exe `
+        /get `
+        "/subcategory:$AuditSubcategory" `
+        /r 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "AuditPol query failed with exit code $LASTEXITCODE. Output: $AuditOutput"
+    }
+
+    $CsvData = $AuditOutput |
+        ConvertFrom-Csv |
+        Select-Object -First 1
+
+    if (-not $CsvData) {
+        throw "AuditPol did not return a result for '$AuditSubcategory'."
+    }
+
+    return $CsvData
+}
+
+if (-not (Test-Administrator)) {
+    Write-Error 'This script must be run as Administrator.'
+    exit 1
+}
+
+try {
+    # Ensure Advanced Audit Policy overrides legacy audit policy settings.
+    if (-not (Test-Path -Path $LsaRegistryPath)) {
+        New-Item -Path $LsaRegistryPath -Force | Out-Null
+    }
+
+    New-ItemProperty `
+        -Path $LsaRegistryPath `
+        -Name $LsaValueName `
+        -PropertyType DWord `
+        -Value $LsaDesiredValue `
+        -Force |
+        Out-Null
+
+    Write-Output 'Configured Advanced Audit Policy to override legacy audit policy.'
+
+    # Enable failure auditing for Detailed File Share.
+    $SetOutput = & auditpol.exe `
+        /set `
+        "/subcategory:$AuditSubcategory" `
+        /success:disable `
+        /failure:enable 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "AuditPol configuration failed with exit code $LASTEXITCODE. Output: $SetOutput"
+    }
+
+    Write-Output "Enabled failure auditing for '$AuditSubcategory'."
+
+    # Validate the audit policy.
+    $AuditSetting = Get-DetailedFileShareAuditSetting
+    $InclusionSetting = $AuditSetting.'Inclusion Setting'
+
+    if ($InclusionSetting -notmatch 'Failure') {
+        throw "Validation failed. Current audit setting: '$InclusionSetting'."
+    }
+
+    # Validate the registry value used to enforce Advanced Audit Policy.
+    $CurrentLsaValue = Get-ItemPropertyValue `
+        -Path $LsaRegistryPath `
+        -Name $LsaValueName `
+        -ErrorAction Stop
+
+    if ($CurrentLsaValue -ne $LsaDesiredValue) {
+        throw "Validation failed. $LsaValueName is set to '$CurrentLsaValue' instead of '$LsaDesiredValue'."
+    }
+
+    Write-Output "Validation passed: '$AuditSubcategory' audits failures."
+    Write-Output 'STIG WN11-AU-000570 was remediated successfully.'
+    exit 0
+}
+catch {
+    Write-Error "STIG remediation failed: $($_.Exception.Message)"
+    exit 1
+}
