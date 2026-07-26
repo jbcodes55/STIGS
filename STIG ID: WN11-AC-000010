@@ -1,0 +1,116 @@
+
+<#
+.SYNOPSIS
+Remediates STIG WN11-AC-000010.
+
+.DESCRIPTION
+Configures the local Windows account lockout threshold to three invalid
+logon attempts.
+
+A value of zero is not compliant because it prevents accounts from being
+locked out.
+
+.NOTES
+STIG ID: WN11-AC-000010
+Vulnerability ID: V-253298
+Severity: CAT II
+CCI: CCI-000044
+
+Run this script from an elevated Windows PowerShell session.
+
+For domain-joined systems, a domain Group Policy may overwrite this local
+setting during the next Group Policy refresh.
+#>
+
+[CmdletBinding()]
+param (
+    [ValidateRange(1, 3)]
+    [int]$LockoutThreshold = 3
+)
+
+$ErrorActionPreference = 'Stop'
+
+function Test-Administrator {
+    $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $Principal = [Security.Principal.WindowsPrincipal]::new($Identity)
+
+    return $Principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
+function Get-EffectiveLockoutThreshold {
+    $ExportFile = Join-Path `
+        -Path $env:TEMP `
+        -ChildPath "STIG_AccountPolicy_$([guid]::NewGuid().Guid).inf"
+
+    try {
+        $Output = & secedit.exe /export /cfg $ExportFile /areas SECURITYPOLICY /quiet 2>&1
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Secedit export failed with exit code $LASTEXITCODE. Output: $Output"
+        }
+
+        $PolicyLine = Get-Content -Path $ExportFile |
+            Where-Object { $_ -match '^\s*LockoutBadCount\s*=' } |
+            Select-Object -First 1
+
+        if (-not $PolicyLine) {
+            throw 'LockoutBadCount was not found in the exported security policy.'
+        }
+
+        $Value = ($PolicyLine -split '=', 2)[1].Trim()
+
+        return [int]$Value
+    }
+    finally {
+        Remove-Item -Path $ExportFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+if (-not (Test-Administrator)) {
+    Write-Error 'This script must be run as Administrator.'
+    exit 1
+}
+
+try {
+    $CurrentThreshold = Get-EffectiveLockoutThreshold
+
+    Write-Output "Current account lockout threshold: $CurrentThreshold attempt(s)."
+
+    if (
+        $CurrentThreshold -ge 1 -and
+        $CurrentThreshold -le 3
+    ) {
+        Write-Output 'The account lockout threshold is already STIG compliant.'
+        exit 0
+    }
+
+    Write-Output "Setting the account lockout threshold to $LockoutThreshold attempt(s)."
+
+    $NetAccountsOutput = & net.exe accounts `
+        "/lockoutthreshold:$LockoutThreshold" 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "The account lockout policy could not be configured. Output: $NetAccountsOutput"
+    }
+
+    # Validate the effective local security policy.
+    $EffectiveThreshold = Get-EffectiveLockoutThreshold
+
+    if (
+        $EffectiveThreshold -lt 1 -or
+        $EffectiveThreshold -gt 3
+    ) {
+        throw "Validation failed. Effective threshold: $EffectiveThreshold"
+    }
+
+    Write-Output "Validation passed: account lockout threshold is $EffectiveThreshold attempt(s)."
+    Write-Output 'STIG WN11-AC-000010 was remediated successfully.'
+    exit 0
+}
+catch {
+    Write-Error "STIG remediation failed: $($_.Exception.Message)"
+    exit 1
+}
+
