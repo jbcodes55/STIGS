@@ -1,0 +1,139 @@
+ <#
+.SYNOPSIS
+Remediates STIG WN11-AU-000083.
+
+.NOTES
+    Author          : Joseph Bonhomme
+    LinkedIn        : https://www.linkedin.com/in/joseph-bonhomme-461010213/
+    GitHub          : github.com/jbcodes55
+    Date Created    : 2026-07-25
+    Last Modified   : 2026-07-25    
+    Version         : 1.0
+    CVEs            : N/A
+    Plugin IDs      : N/A
+    STIG-ID         : WN11-CC-000090
+.TESTED ON
+    Date(s) Tested  : 2026-07-25
+    Tested By       : threat-vm
+    Systems Tested  : 
+    PowerShell Ver. : 
+
+.USAGE
+    Put any usage instructions here.
+    Example syntax:
+#>
+<#
+
+.DESCRIPTION
+Configures the Advanced Audit Policy subcategory
+"Other Object Access Events" to audit successful events.
+
+This script also enables:
+"Audit: Force audit policy subcategory settings to override
+audit policy category settings"
+
+That supporting setting is required for advanced audit
+subcategory settings to take effect.
+
+.NOTES
+STIG ID: WN11-AU-000083
+Vulnerability ID: V-253321
+Severity: CAT II
+
+Run this script from an elevated PowerShell session.
+#>
+
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = "Stop"
+
+$AuditSubcategory = "Other Object Access Events"
+
+# WN11-SO-000030 supporting registry setting
+$AuditPolicyRegistryPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
+$AuditPolicyValueName    = "SCENoApplyLegacyAuditPolicy"
+$AuditPolicyDesiredValue = 1
+
+function Test-Administrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+
+    return $principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
+if (-not (Test-Administrator)) {
+    Write-Error "This script must be run as Administrator."
+    exit 1
+}
+
+try {
+    # Ensure advanced audit policy subcategories override legacy categories.
+    if (-not (Test-Path -Path $AuditPolicyRegistryPath)) {
+        New-Item -Path $AuditPolicyRegistryPath -Force | Out-Null
+    }
+
+    New-ItemProperty `
+        -Path $AuditPolicyRegistryPath `
+        -Name $AuditPolicyValueName `
+        -PropertyType DWord `
+        -Value $AuditPolicyDesiredValue `
+        -Force | Out-Null
+
+    Write-Output "Enabled advanced audit policy subcategory enforcement."
+
+    # Configure successful auditing for Other Object Access Events.
+    $auditPolOutput = & auditpol.exe /set `
+        "/subcategory:$AuditSubcategory" `
+        /success:enable `
+        /failure:disable 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "AuditPol failed with exit code $LASTEXITCODE. Output: $auditPolOutput"
+    }
+
+    Write-Output "Enabled Success auditing for '$AuditSubcategory'."
+
+    # Validate the supporting registry setting.
+    $overrideValue = Get-ItemPropertyValue `
+        -Path $AuditPolicyRegistryPath `
+        -Name $AuditPolicyValueName
+
+    if ($overrideValue -ne $AuditPolicyDesiredValue) {
+        throw "Advanced audit policy override validation failed."
+    }
+
+    # Validate the audit subcategory configuration.
+    $validationOutput = & auditpol.exe /get `
+        "/subcategory:$AuditSubcategory" `
+        /r 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "AuditPol validation failed. Output: $validationOutput"
+    }
+
+    $auditResult = $validationOutput |
+        ConvertFrom-Csv |
+        Where-Object {
+            $_.'Subcategory' -eq $AuditSubcategory
+        }
+
+    if (-not $auditResult) {
+        throw "Could not locate '$AuditSubcategory' in the AuditPol results."
+    }
+
+    $inclusionSetting = $auditResult.'Inclusion Setting'
+
+    if ($inclusionSetting -notmatch "Success") {
+        throw "Validation failed. Current setting: '$inclusionSetting'."
+    }
+
+    Write-Output "Validation passed: '$AuditSubcategory' is configured to audit successes."
+    exit 0
+}
+catch {
+    Write-Error "STIG remediation failed: $($_.Exception.Message)"
+    exit 1
+}
